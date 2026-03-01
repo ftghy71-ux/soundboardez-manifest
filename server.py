@@ -1,49 +1,35 @@
-from flask import Flask, jsonify, request
-import requests
+from flask import Flask, jsonify, request, render_template, redirect
 import json
 import os
 
 app = Flask(__name__)
-
-REPO = "ami-nope/SoundboardEZ"
 CONFIG_FILE = "update_config.json"
 
-@app.route("/manifest")
-def manifest():
-    channel = request.args.get("channel", "stable")
+@app.route("/admin", methods=["GET", "POST"])
+def admin():
+    if request.method == "POST":
+        channel = request.form["channel"]
+        version = request.form["version"]
+        mandatory = request.form.get("mandatory") == "on"
+        patch_notes = request.form["patch_notes"]
+        min_required = request.form["min_required"]
 
-    try:
         with open(CONFIG_FILE, "r") as f:
             config = json.load(f)
 
-        if channel not in config:
-            return jsonify({"error": "Invalid channel"}), 400
-
-        channel_data = config[channel]
-        version = channel_data["version"]
-
-        # Fetch specific release by tag
-        r = requests.get(
-            f"https://api.github.com/repos/{REPO}/releases/tags/{version}",
-            timeout=5
-        )
-        r.raise_for_status()
-        release = r.json()
-
-        files = {}
-
-        for asset in release.get("assets", []):
-            files[asset["name"]] = {
-                "url": asset["browser_download_url"]
-            }
-
-        return jsonify({
+        config[channel] = {
             "version": version,
-            "mandatory": channel_data["mandatory"],
-            "patch_notes": channel_data["patch_notes"],
-            "min_required_version": channel_data["min_required_version"],
-            "files": files
-        })
+            "mandatory": mandatory,
+            "patch_notes": patch_notes,
+            "min_required_version": min_required
+        }
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+
+        return redirect("/admin")
+
+    with open(CONFIG_FILE, "r") as f:
+        config = json.load(f)
+
+    return render_template("admin.html", config=config)

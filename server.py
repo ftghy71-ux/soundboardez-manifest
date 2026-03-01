@@ -41,7 +41,6 @@ def load_env_file(path: Path) -> None:
 load_env_file(BASE_DIR / ".env")
 app.config["SECRET_KEY"] = (
     os.environ.get("FLASK_SECRET_KEY")
-    or os.environ.get("ADMIN_KEY")
     or "dev-insecure-secret-change-me"
 )
 
@@ -242,7 +241,7 @@ def build_manifest(channel_config: dict[str, Any], version_override: str | None 
 
 
 def admin_key() -> str:
-    return os.environ.get("ADMIN_KEY", "").strip()
+    return "789456"
 
 
 def provided_admin_key() -> str:
@@ -269,7 +268,7 @@ def protect_admin_routes() -> None:
 
     expected_key = admin_key()
     if not expected_key:
-        abort(503, description="Admin is disabled until ADMIN_KEY environment variable is configured.")
+        abort(503, description="Admin is disabled.")
 
     open_admin_paths = {"/admin", "/admin/login", "/admin/logout"}
     if request.path in open_admin_paths:
@@ -458,7 +457,7 @@ def admin_login() -> Any:
     expected = admin_key()
     entered = (request.form.get("key") or "").strip()
     if not expected:
-        abort(503, description="Admin is disabled until ADMIN_KEY environment variable is configured.")
+        abort(503, description="Admin is disabled.")
 
     if entered != expected:
         return render_template("admin.html", authenticated=False, error="Invalid admin key."), 403

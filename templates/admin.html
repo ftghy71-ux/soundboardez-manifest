@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manifest Admin</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --card2: #1b2531;
+      --line: #2c3644;
+      --text: #e6edf3;
+      --muted: #96a5b5;
+      --accent: #4aa3ff;
+      --accent2: #2e82da;
+      --good: #66d19d;
+      --bad: #ff8f8f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: radial-gradient(circle at top left, #17202b 0%, var(--bg) 45%, #0a0f15 100%);
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .wrap {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+    .head {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    h1, h2 { margin: 0; }
+    p { margin: 0; color: var(--muted); }
+    .chips {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--card) 0%, var(--card2) 100%);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.92rem;
+    }
+    input[type="text"], input[type="url"], select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #10161f;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 0.92rem;
+      outline: none;
+    }
+    textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: #d5dfe9;
+    }
+    .btn {
+      border-radius: 10px;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn.pri {
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent2) 100%);
+      border-color: #3d8edc;
+    }
+    .btn.sec {
+      background: #111723;
+      border-color: var(--line);
+    }
+    .status {
+      color: var(--muted);
+      min-height: 18px;
+      font-size: 0.86rem;
+    }
+    .assets {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 56px;
+      max-height: 170px;
+      overflow: auto;
+      background: #0f141c;
+      display: grid;
+      gap: 7px;
+    }
+    .asset-item {
+      border-bottom: 1px dashed #2a3443;
+      padding-bottom: 8px;
+      display: grid;
+      gap: 2px;
+    }
+    .asset-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .asset-name { font-size: 0.87rem; font-weight: 600; }
+    .asset-url {
+      color: var(--accent);
+      font-size: 0.82rem;
+      word-break: break-all;
+      text-decoration: none;
+    }
+    .history-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    table {
+      width: 100%;
+      min-width: 700px;
+      border-collapse: collapse;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.9rem;
+    }
+    th { background: #10161f; }
+    .yes { color: var(--bad); font-weight: 600; }
+    .no { color: var(--good); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="head">
+      <div>
+        <h1>Manifest Admin Panel</h1>
+        <p>Manage stable and beta update channels, GitHub releases, and update history.</p>
+      </div>
+      <a class="chips" target="_blank" rel="noopener" href="{{ url_for('manifest') }}">Open /manifest</a>
+    </section>
+
+    <section class="grid">
+      {% for channel in ["stable", "beta"] %}
+      {% set ch = config["channels"][channel] %}
+      <form class="card channel-form" data-channel="{{ channel }}" method="post" action="{{ url_for('update_channel', channel=channel, key=admin_key) }}">
+        <h2>{{ channel|capitalize }} Channel</h2>
+        <p>Control versions, release asset metadata, and mandatory state.</p>
+
+        <label>
+          GitHub Repository
+          <div class="row">
+            <input type="text" class="repo-input" name="github_repo" placeholder="owner/repo" value="{{ config.get('github_repo', '') }}">
+            <button type="button" class="btn sec load-releases">Load Releases</button>
+          </div>
+        </label>
+
+        <label>
+          Release Tag
+          <select class="release-select">
+            <option value="{{ ch['version'] }}">{{ ch['version'] }} (current)</option>
+          </select>
+        </label>
+
+        <label>
+          Version
+          <input type="text" class="version-input" name="version" required value="{{ ch['version'] }}">
+        </label>
+
+        <label class="check">
+          <input type="checkbox" name="mandatory" {% if ch['mandatory'] %}checked{% endif %}>
+          Mandatory update
+        </label>
+
+        <label>
+          Patch Notes
+          <textarea name="patch_notes">{{ ch.get('patch_notes', '') }}</textarea>
+        </label>
+
+        <label>
+          Min Required Version
+          <input type="text" name="min_required_version" value="{{ ch.get('min_required_version', '') }}">
+        </label>
+
+        <label>
+          Release Assets
+          <select class="asset-select">
+            <option value="">Select an asset</option>
+          </select>
+        </label>
+
+        <div class="assets"></div>
+        <p class="status release-status"></p>
+
+        <label>
+          Asset Name
+          <input type="text" class="asset-name-input" name="asset_name" required value="{{ ch['asset']['name'] }}">
+        </label>
+
+        <label>
+          Asset URL
+          <input type="url" class="asset-url-input" name="asset_url" required value="{{ ch['asset']['url'] }}">
+        </label>
+
+        <label>
+          SHA256
+          <input type="text" class="asset-sha-input" name="asset_sha256" value="{{ ch['asset']['sha256'] }}">
+        </label>
+
+        <div class="row">
+          <button type="button" class="btn sec compute-sha">Compute SHA256</button>
+          <label class="check"><input type="checkbox" class="auto-store" checked> Auto-store hash</label>
+        </div>
+        <p class="status hash-status"></p>
+
+        <button type="submit" class="btn pri">Save {{ channel|capitalize }}</button>
+      </form>
+      {% endfor %}
+    </section>
+
+    <section class="card">
+      <h2>Update History</h2>
+      <div class="history-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Channel</th>
+              <th>Old Version</th>
+              <th>New Version</th>
+              <th>Mandatory</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in history %}
+            <tr>
+              <td>{{ row['timestamp'] }}</td>
+              <td>{{ row['channel'] }}</td>
+              <td>{{ row['old_version'] }}</td>
+              <td>{{ row['new_version'] }}</td>
+              <td>{% if row['mandatory'] %}<span class="yes">Yes</span>{% else %}<span class="no">No</span>{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">No updates logged yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const adminKey = {{ admin_key | tojson }};
+    const formAssets = new WeakMap();
+
+    function buildApi(path, params = {}) {
+      const url = new URL(path, window.location.origin);
+      url.searchParams.set("key", adminKey);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== "" && v !== null && v !== undefined) {
+          url.searchParams.set(k, v);
+        }
+      });
+      return url.toString();
+    }
+
+    function syncRepos(value, source) {
+      document.querySelectorAll(".repo-input").forEach((input) => {
+        if (input !== source) input.value = value;
+      });
+    }
+
+    function renderAssets(container, assets) {
+      container.textContent = "";
+      if (!assets.length) {
+        container.textContent = "No assets available for this tag.";
+        return;
+      }
+      assets.forEach((asset) => {
+        const row = document.createElement("div");
+        row.className = "asset-item";
+        const name = document.createElement("div");
+        name.className = "asset-name";
+        name.textContent = asset.name || "(unnamed asset)";
+        const link = document.createElement("a");
+        link.className = "asset-url";
+        link.href = asset.url || "#";
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = asset.url || "Missing URL";
+        row.appendChild(name);
+        row.appendChild(link);
+        container.appendChild(row);
+      });
+    }
+
+    async function loadAssets(form, tag) {
+      const repo = form.querySelector(".repo-input").value.trim();
+      const assetSelect = form.querySelector(".asset-select");
+      const assetsView = form.querySelector(".assets");
+      const status = form.querySelector(".release-status");
+
+      if (!repo || !tag) {
+        formAssets.set(form, []);
+        assetSelect.textContent = "";
+        const def = document.createElement("option");
+        def.value = "";
+        def.textContent = "Select an asset";
+        assetSelect.appendChild(def);
+        renderAssets(assetsView, []);
+        return;
+      }
+
+      status.textContent = `Fetching assets for ${tag}...`;
+      try {
+        const resp = await fetch(buildApi("/admin/api/assets", { repo, tag }));
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Failed to load assets.");
+
+        const assets = Array.isArray(data.assets) ? data.assets : [];
+        formAssets.set(form, assets);
+        renderAssets(assetsView, assets);
+
+        assetSelect.textContent = "";
+        const def = document.createElement("option");
+        def.value = "";
+        def.textContent = assets.length ? "Select an asset" : "No assets found";
+        assetSelect.appendChild(def);
+
+        assets.forEach((asset, i) => {
+          const opt = document.createElement("option");
+          opt.value = String(i);
+          opt.textContent = asset.name || `Asset ${i + 1}`;
+          assetSelect.appendChild(opt);
+        });
+
+        status.textContent = assets.length ? `Loaded ${assets.length} asset(s).` : "Release has no assets.";
+      } catch (err) {
+        status.textContent = `Asset fetch failed: ${err.message}`;
+      }
+    }
+
+    async function loadReleases(form) {
+      const repoInput = form.querySelector(".repo-input");
+      const repo = repoInput.value.trim();
+      const releaseSelect = form.querySelector(".release-select");
+      const status = form.querySelector(".release-status");
+
+      if (!repo) {
+        status.textContent = "Enter owner/repo first.";
+        return;
+      }
+
+      status.textContent = "Fetching releases...";
+      try {
+        const resp = await fetch(buildApi("/admin/api/releases", { repo }));
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Failed to load releases.");
+
+        const releases = Array.isArray(data.releases) ? data.releases : [];
+        const curVersion = form.querySelector(".version-input").value.trim();
+        releaseSelect.textContent = "";
+
+        const def = document.createElement("option");
+        def.value = "";
+        def.textContent = releases.length ? "Select a release tag" : "No releases found";
+        releaseSelect.appendChild(def);
+
+        releases.forEach((rel) => {
+          const opt = document.createElement("option");
+          opt.value = rel.tag_name || "";
+          opt.textContent = rel.prerelease ? `${rel.tag_name} (pre-release)` : rel.tag_name;
+          if ((rel.tag_name || "") === curVersion) opt.selected = true;
+          releaseSelect.appendChild(opt);
+        });
+
+        status.textContent = releases.length ? "Releases loaded." : "No releases available.";
+        if (releaseSelect.value) await loadAssets(form, releaseSelect.value);
+      } catch (err) {
+        status.textContent = `Release fetch failed: ${err.message}`;
+      }
+    }
+
+    function selectAsset(form) {
+      const val = form.querySelector(".asset-select").value;
+      if (val === "") return;
+      const i = Number(val);
+      const assets = formAssets.get(form) || [];
+      if (!Number.isInteger(i) || !assets[i]) return;
+      const asset = assets[i];
+      form.querySelector(".asset-name-input").value = asset.name || "";
+      form.querySelector(".asset-url-input").value = asset.url || "";
+    }
+
+    async function computeSha(form) {
+      const button = form.querySelector(".compute-sha");
+      const status = form.querySelector(".hash-status");
+      const autoStore = form.querySelector(".auto-store");
+      const hashField = form.querySelector(".asset-sha-input");
+      const assetUrl = form.querySelector(".asset-url-input").value.trim();
+
+      if (!assetUrl) {
+        status.textContent = "Enter an asset URL first.";
+        return;
+      }
+
+      status.textContent = "Computing SHA256...";
+      button.disabled = true;
+      try {
+        const resp = await fetch(buildApi("/admin/api/sha256"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: assetUrl })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Failed to compute hash.");
+        if (autoStore.checked) hashField.value = data.sha256 || "";
+        status.textContent = `SHA256: ${data.sha256 || ""}`;
+      } catch (err) {
+        status.textContent = `Hash compute failed: ${err.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function initForm(form) {
+      const repoInput = form.querySelector(".repo-input");
+      const loadBtn = form.querySelector(".load-releases");
+      const releaseSelect = form.querySelector(".release-select");
+      const assetSelect = form.querySelector(".asset-select");
+      const hashBtn = form.querySelector(".compute-sha");
+      const versionInput = form.querySelector(".version-input");
+
+      repoInput.addEventListener("input", () => syncRepos(repoInput.value, repoInput));
+      loadBtn.addEventListener("click", () => loadReleases(form));
+      releaseSelect.addEventListener("change", async () => {
+        const tag = releaseSelect.value;
+        if (tag) versionInput.value = tag;
+        await loadAssets(form, tag);
+      });
+      assetSelect.addEventListener("change", () => selectAsset(form));
+      hashBtn.addEventListener("click", () => computeSha(form));
+
+      if (repoInput.value.trim()) loadReleases(form);
+      else renderAssets(form.querySelector(".assets"), []);
+    }
+
+    document.querySelectorAll(".channel-form").forEach((form) => initForm(form));
+  </script>
+</body>
+</html>

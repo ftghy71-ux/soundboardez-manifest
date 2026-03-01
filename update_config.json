@@ -2,13 +2,13 @@
   "github_repo": "ami-nope/SoundboardEZ",
   "channels": {
     "stable": {
-      "version": "1.0.0",
-      "mandatory": false,
+      "version": "1.3",
+      "mandatory": true,
       "patch_notes": "",
       "min_required_version": "",
       "asset": {
-        "name": "SoundboardEZ_full.zip",
-        "url": "https://yourcdn.com/1.0.0/SoundboardEZ_full.zip"
+        "name": "SoundboardEZ1.3.zip",
+        "url": "https://github.com/ami-nope/SoundboardEZ/releases/download/1.3/SoundboardEZ1.3.zip"
       }
     },
     "beta": {

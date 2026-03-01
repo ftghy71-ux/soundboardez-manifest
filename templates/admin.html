@@ -161,6 +161,30 @@
     th { background: #10161f; }
     .yes { color: var(--bad); font-weight: 600; }
     .no { color: var(--good); font-weight: 600; }
+    .history-action {
+      width: 56px;
+      text-align: center;
+    }
+    .history-delete-form {
+      margin: 0;
+      display: inline;
+    }
+    .history-delete-btn {
+      width: 24px;
+      height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #10161f;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.95rem;
+      line-height: 1;
+      padding: 0;
+    }
+    .history-delete-btn:hover {
+      border-color: var(--bad);
+      color: var(--bad);
+    }
     .head-actions {
       display: flex;
       gap: 10px;
@@ -290,6 +314,7 @@
               <th>Old Version</th>
               <th>New Version</th>
               <th>Mandatory</th>
+              <th class="history-action">Delete</th>
             </tr>
           </thead>
           <tbody>
@@ -300,9 +325,19 @@
               <td>{{ row['old_version'] }}</td>
               <td>{{ row['new_version'] }}</td>
               <td>{% if row['mandatory'] %}<span class="yes">Yes</span>{% else %}<span class="no">No</span>{% endif %}</td>
+              <td class="history-action">
+                <form class="history-delete-form" method="post" action="{{ url_for('admin_delete_history') }}">
+                  <input type="hidden" name="timestamp" value="{{ row['timestamp'] }}">
+                  <input type="hidden" name="channel" value="{{ row['channel'] }}">
+                  <input type="hidden" name="old_version" value="{{ row['old_version'] }}">
+                  <input type="hidden" name="new_version" value="{{ row['new_version'] }}">
+                  <input type="hidden" name="mandatory" value="{{ 1 if row['mandatory'] else 0 }}">
+                  <button type="submit" class="history-delete-btn" title="Delete this update from history">&times;</button>
+                </form>
+              </td>
             </tr>
             {% else %}
-            <tr><td colspan="5">No updates logged yet.</td></tr>
+            <tr><td colspan="6">No updates logged yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>

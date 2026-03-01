@@ -225,6 +225,36 @@ def append_history_entry(channel: str, old_version: str, new_version: str, manda
     save_history(history)
 
 
+def delete_history_entry(
+    timestamp: str,
+    channel: str,
+    old_version: str,
+    new_version: str,
+    mandatory: bool,
+) -> bool:
+    history = load_history()
+    remaining: list[dict[str, Any]] = []
+    removed = False
+
+    for entry in history["history"]:
+        entry_matches = (
+            str(entry.get("timestamp", "")).strip() == timestamp
+            and str(entry.get("channel", "")).strip() == channel
+            and str(entry.get("old_version", "")).strip() == old_version
+            and str(entry.get("new_version", "")).strip() == new_version
+            and coerce_bool(entry.get("mandatory", False)) == mandatory
+        )
+        if entry_matches and not removed:
+            removed = True
+            continue
+        remaining.append(entry)
+
+    if removed:
+        save_history({"history": remaining})
+
+    return removed
+
+
 def build_manifest(channel_config: dict[str, Any], version_override: str | None = None) -> dict[str, Any]:
     asset = channel_config.get("asset", {})
     asset_url = str(asset.get("url", "")).strip()
@@ -275,13 +305,14 @@ def protect_admin_routes() -> None:
         authorize_admin_from_query_key()
         return
 
-    if not request.path.startswith("/admin/api") and not request.path.startswith("/admin/update"):
+    protected_prefixes = ("/admin/api", "/admin/update", "/admin/history")
+    if not request.path.startswith(protected_prefixes):
         return
 
     authed = is_admin_authenticated() or authorize_admin_from_query_key()
     if request.path.startswith("/admin/api") and not authed:
         return jsonify({"error": "Forbidden. Sign in from /admin first."}), 403
-    if request.path.startswith("/admin/update") and not authed:
+    if not authed:
         return redirect(url_for("admin_panel"))
 
 
@@ -407,31 +438,13 @@ def compute_sha256_from_url(asset_url: str) -> str:
 
 @app.route("/manifest")
 def manifest() -> Any:
-    config = load_config()
-    selected_channel = (request.args.get("channel") or "stable").strip().lower()
-    channel_key = "beta" if selected_channel == "beta" else "stable"
-    channel_config = deep_copy(config["channels"][channel_key])
-    github_repo = LOCKED_GITHUB_REPO
-    resolved_version = str(channel_config.get("version", "")).strip()
-
-    if github_repo:
-        try:
-            prefix = manifest_tag_prefix()
-            release_asset = resolve_manifest_release_asset(
-                repo=github_repo,
-                channel=channel_key,
-                tag_prefix=prefix,
-                required_asset_name=manifest_asset_name(),
-            )
-            if release_asset:
-                resolved_version = prefix or release_asset["version"]
-                channel_config.setdefault("asset", {})
-                channel_config["asset"]["url"] = release_asset["asset_url"]
-        except requests.RequestException:
-            # Fall back to configured manifest values when GitHub is unavailable.
-            pass
-
-    return jsonify(build_manifest(channel_config, version_override=resolved_version))
+    return jsonify({
+        "version": "1.3",
+        "mandatory": True,
+        "full": {
+            "url": "https://github.com/ami-nope/SoundboardEZ/releases/download/1.3/SoundboardEZ1.3.zip"
+        }
+    })
 
 
 @app.route("/admin")
@@ -530,6 +543,24 @@ def update_channel(channel: str) -> Any:
     save_config(config)
     append_history_entry(channel_key, old_version, new_version, mandatory)
 
+    return redirect(url_for("admin_panel"))
+
+
+@app.post("/admin/history/delete")
+def admin_delete_history() -> Any:
+    timestamp = (request.form.get("timestamp") or "").strip()
+    channel = (request.form.get("channel") or "").strip()
+    old_version = (request.form.get("old_version") or "").strip()
+    new_version = (request.form.get("new_version") or "").strip()
+    mandatory = coerce_bool(request.form.get("mandatory"))
+
+    delete_history_entry(
+        timestamp=timestamp,
+        channel=channel,
+        old_version=old_version,
+        new_version=new_version,
+        mandatory=mandatory,
+    )
     return redirect(url_for("admin_panel"))
 
 

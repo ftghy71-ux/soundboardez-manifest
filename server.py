@@ -5,12 +5,11 @@ app = Flask(__name__)
 @app.route("/manifest")
 def manifest():
     return jsonify({
-        "version": "1.0.0",
+        "version": "1.1",
         "mandatory": False,
         "files": {
             "SoundboardEZ.exe": {
-                "url": "https://yourcdn.com/1.0.0/SoundboardEZ.exe",
-                "sha256": "PUT_REAL_HASH_HERE"
+                "url": "https://github.com/ami-nope/SoundboardEZ/releases/download/1.1/SoundboardEZ.exe"
             }
         }
     })

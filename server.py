@@ -17,6 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "update_config.json"
 HISTORY_PATH = BASE_DIR / "update_history.json"
 GITHUB_API_BASE = "https://api.github.com"
+LOCKED_GITHUB_REPO = "ami-nope/SoundboardEZ"
 
 
 def load_env_file(path: Path) -> None:
@@ -45,7 +46,16 @@ app.config["SECRET_KEY"] = (
 )
 
 
-def default_channel(version: str, asset_name: str, asset_url: str, sha256: str) -> dict[str, Any]:
+def manifest_tag_prefix() -> str:
+    return os.environ.get("MANIFEST_TAG_PREFIX", "1.2").strip()
+
+
+def manifest_asset_name() -> str:
+    configured_name = os.environ.get("MANIFEST_ASSET_NAME", "SoundboardEZ_full.zip").strip()
+    return configured_name or "SoundboardEZ_full.zip"
+
+
+def default_channel(version: str, asset_name: str, asset_url: str) -> dict[str, Any]:
     return {
         "version": version,
         "mandatory": False,
@@ -54,26 +64,23 @@ def default_channel(version: str, asset_name: str, asset_url: str, sha256: str) 
         "asset": {
             "name": asset_name,
             "url": asset_url,
-            "sha256": sha256,
         },
     }
 
 
 def build_default_config() -> dict[str, Any]:
     return {
-        "github_repo": "",
+        "github_repo": LOCKED_GITHUB_REPO,
         "channels": {
             "stable": default_channel(
                 version="1.0.0",
                 asset_name="SoundboardEZ.exe",
                 asset_url="https://yourcdn.com/1.0.0/SoundboardEZ.exe",
-                sha256="PUT_REAL_HASH_HERE",
             ),
             "beta": default_channel(
                 version="1.0.0-beta.1",
                 asset_name="SoundboardEZ-beta.exe",
                 asset_url="https://yourcdn.com/1.0.0-beta.1/SoundboardEZ-beta.exe",
-                sha256="",
             ),
         },
     }
@@ -128,12 +135,10 @@ def normalize_channel(raw_channel: Any, fallback: dict[str, Any]) -> dict[str, A
     if isinstance(raw_asset, dict):
         channel["asset"]["name"] = str(raw_asset.get("name", channel["asset"]["name"])).strip()
         channel["asset"]["url"] = str(raw_asset.get("url", channel["asset"]["url"])).strip()
-        channel["asset"]["sha256"] = str(raw_asset.get("sha256", channel["asset"]["sha256"])).strip()
     else:
-        # Compatibility with legacy shape where url/hash were stored at the channel root.
+        # Compatibility with legacy shape where asset fields were stored at channel root.
         channel["asset"]["name"] = str(raw_channel.get("asset_name", channel["asset"]["name"])).strip()
         channel["asset"]["url"] = str(raw_channel.get("url", channel["asset"]["url"])).strip()
-        channel["asset"]["sha256"] = str(raw_channel.get("sha256", channel["asset"]["sha256"])).strip()
 
     return channel
 
@@ -153,7 +158,8 @@ def normalize_config(raw_config: Any) -> dict[str, Any]:
         }
 
     normalized = {
-        "github_repo": str(raw_config.get("github_repo", defaults["github_repo"])).strip(),
+        # Repository is fixed for this deployment; ignore any stored/user-provided values.
+        "github_repo": LOCKED_GITHUB_REPO,
         "channels": {
             "stable": normalize_channel(raw_channels.get("stable"), defaults["channels"]["stable"]),
             "beta": normalize_channel(raw_channels.get("beta"), defaults["channels"]["beta"]),
@@ -220,29 +226,19 @@ def append_history_entry(channel: str, old_version: str, new_version: str, manda
     save_history(history)
 
 
-def build_manifest(channel_config: dict[str, Any]) -> dict[str, Any]:
+def build_manifest(channel_config: dict[str, Any], version_override: str | None = None) -> dict[str, Any]:
     asset = channel_config.get("asset", {})
-    asset_name = str(asset.get("name", "SoundboardEZ.exe")).strip() or "SoundboardEZ.exe"
+    asset_url = str(asset.get("url", "")).strip()
 
-    payload: dict[str, Any] = {
-        "version": str(channel_config.get("version", "")).strip(),
+    return {
+        "version": (version_override or str(channel_config.get("version", "")).strip()),
         "mandatory": coerce_bool(channel_config.get("mandatory", False)),
         "files": {
-            asset_name: {
-                "url": str(asset.get("url", "")).strip(),
-                "sha256": str(asset.get("sha256", "")).strip(),
+            "full_package": {
+                "url": asset_url,
             }
         },
     }
-
-    patch_notes = str(channel_config.get("patch_notes", "")).strip()
-    min_required = str(channel_config.get("min_required_version", "")).strip()
-    if patch_notes:
-        payload["patch_notes"] = patch_notes
-    if min_required:
-        payload["min_required_version"] = min_required
-
-    return payload
 
 
 def admin_key() -> str:
@@ -327,6 +323,54 @@ def fetch_releases(repo: str) -> list[dict[str, Any]]:
     return releases
 
 
+def fetch_raw_releases(repo: str) -> list[dict[str, Any]]:
+    response = requests.get(
+        f"{GITHUB_API_BASE}/repos/{repo}/releases",
+        headers=github_headers(),
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    return [release for release in payload if isinstance(release, dict)]
+
+
+def resolve_manifest_release_asset(
+    repo: str,
+    channel: str,
+    tag_prefix: str,
+    required_asset_name: str,
+) -> dict[str, str] | None:
+    releases = fetch_raw_releases(repo)
+    for release in releases:
+        if coerce_bool(release.get("draft", False)):
+            continue
+        if channel == "stable" and coerce_bool(release.get("prerelease", False)):
+            continue
+
+        tag_name = str(release.get("tag_name", "")).strip()
+        if not tag_name:
+            continue
+        if tag_prefix and not tag_name.startswith(tag_prefix):
+            continue
+
+        assets = release.get("assets", [])
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            asset_name = str(asset.get("name", "")).strip()
+            asset_url = str(asset.get("browser_download_url", "")).strip()
+            if asset_name == required_asset_name and asset_url:
+                return {
+                    "version": tag_name,
+                    "asset_url": asset_url,
+                }
+    return None
+
+
 def fetch_assets_for_tag(repo: str, tag: str) -> list[dict[str, str]]:
     safe_tag = quote(tag, safe="")
     response = requests.get(
@@ -367,7 +411,28 @@ def manifest() -> Any:
     config = load_config()
     selected_channel = (request.args.get("channel") or "stable").strip().lower()
     channel_key = "beta" if selected_channel == "beta" else "stable"
-    return jsonify(build_manifest(config["channels"][channel_key]))
+    channel_config = deep_copy(config["channels"][channel_key])
+    github_repo = LOCKED_GITHUB_REPO
+    resolved_version = str(channel_config.get("version", "")).strip()
+
+    if github_repo:
+        try:
+            prefix = manifest_tag_prefix()
+            release_asset = resolve_manifest_release_asset(
+                repo=github_repo,
+                channel=channel_key,
+                tag_prefix=prefix,
+                required_asset_name=manifest_asset_name(),
+            )
+            if release_asset:
+                resolved_version = prefix or release_asset["version"]
+                channel_config.setdefault("asset", {})
+                channel_config["asset"]["url"] = release_asset["asset_url"]
+        except requests.RequestException:
+            # Fall back to configured manifest values when GitHub is unavailable.
+            pass
+
+    return jsonify(build_manifest(channel_config, version_override=resolved_version))
 
 
 @app.route("/admin")
@@ -382,6 +447,8 @@ def admin_panel() -> Any:
         "admin.html",
         authenticated=True,
         config=config,
+        locked_repo=LOCKED_GITHUB_REPO,
+        required_asset_name=manifest_asset_name(),
         history=history,
     )
 
@@ -425,10 +492,30 @@ def update_channel(channel: str) -> Any:
     ).strip()
     asset_name = (request.form.get("asset_name") or channel_config["asset"].get("name", "")).strip()
     asset_url = (request.form.get("asset_url") or channel_config["asset"].get("url", "")).strip()
-    asset_sha256 = (request.form.get("asset_sha256") or channel_config["asset"].get("sha256", "")).strip()
 
-    github_repo = (request.form.get("github_repo") or config.get("github_repo", "")).strip()
-    config["github_repo"] = github_repo
+    # Keep repository fixed regardless of request payload.
+    config["github_repo"] = LOCKED_GITHUB_REPO
+
+    # Auto-resolve asset URL from selected release if the UI did not provide one.
+    if new_version and not asset_url:
+        try:
+            release_assets = fetch_assets_for_tag(LOCKED_GITHUB_REPO, new_version)
+            required_name = manifest_asset_name()
+            preferred = next(
+                (item for item in release_assets if item.get("url") and item.get("name") == required_name),
+                None,
+            )
+            if preferred is None:
+                preferred = next((item for item in release_assets if item.get("url")), None)
+            if preferred is not None:
+                resolved_name = str(preferred.get("name", "")).strip()
+                resolved_url = str(preferred.get("url", "")).strip()
+                if resolved_name:
+                    asset_name = resolved_name
+                if resolved_url:
+                    asset_url = resolved_url
+        except requests.RequestException:
+            pass
 
     config["channels"][channel_key] = {
         "version": new_version,
@@ -438,7 +525,6 @@ def update_channel(channel: str) -> Any:
         "asset": {
             "name": asset_name,
             "url": asset_url,
-            "sha256": asset_sha256,
         },
     }
 
@@ -450,36 +536,27 @@ def update_channel(channel: str) -> Any:
 
 @app.get("/admin/api/releases")
 def admin_api_releases() -> Any:
-    config = load_config()
-    repo = (request.args.get("repo") or config.get("github_repo", "")).strip()
-    if not repo:
-        return jsonify({"releases": []})
-
     try:
-        releases = fetch_releases(repo)
+        releases = fetch_releases(LOCKED_GITHUB_REPO)
     except requests.RequestException as exc:
         return jsonify({"error": "Failed to fetch releases from GitHub.", "details": str(exc)}), 502
 
-    return jsonify({"releases": releases})
+    return jsonify({"repo": LOCKED_GITHUB_REPO, "releases": releases})
 
 
 @app.get("/admin/api/assets")
 def admin_api_assets() -> Any:
-    config = load_config()
-    repo = (request.args.get("repo") or config.get("github_repo", "")).strip()
     tag = (request.args.get("tag") or "").strip()
 
-    if not repo:
-        return jsonify({"error": "GitHub repository is required."}), 400
     if not tag:
         return jsonify({"error": "Release tag is required."}), 400
 
     try:
-        assets = fetch_assets_for_tag(repo, tag)
+        assets = fetch_assets_for_tag(LOCKED_GITHUB_REPO, tag)
     except requests.RequestException as exc:
         return jsonify({"error": "Failed to fetch release assets from GitHub.", "details": str(exc)}), 502
 
-    return jsonify({"tag": tag, "assets": assets})
+    return jsonify({"repo": LOCKED_GITHUB_REPO, "tag": tag, "assets": assets})
 
 
 @app.post("/admin/api/sha256")

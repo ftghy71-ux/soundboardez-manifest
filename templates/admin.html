@@ -180,6 +180,16 @@
       color: var(--bad);
       font-size: 0.88rem;
     }
+    .hint {
+      margin-top: -2px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+    input[readonly] {
+      opacity: 0.92;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -206,11 +216,8 @@
         <p>Control versions, release asset metadata, and mandatory state.</p>
 
         <label>
-          GitHub Repository
-          <div class="row">
-            <input type="text" class="repo-input" name="github_repo" placeholder="owner/repo" value="{{ config.get('github_repo', '') }}">
-            <button type="button" class="btn sec load-releases">Load Releases</button>
-          </div>
+          GitHub Repository (Locked)
+          <input type="text" class="repo-input" value="{{ locked_repo }}" readonly>
         </label>
 
         <label>
@@ -237,7 +244,13 @@
 
         <label>
           Min Required Version
-          <input type="text" name="min_required_version" value="{{ ch.get('min_required_version', '') }}">
+          <select class="min-required-select" name="min_required_version" data-current="{{ ch.get('min_required_version', '') }}">
+            {% if ch.get('min_required_version', '') %}
+            <option value="{{ ch.get('min_required_version', '') }}" selected>{{ ch.get('min_required_version', '') }} (current)</option>
+            {% else %}
+            <option value="" selected>None (no minimum)</option>
+            {% endif %}
+          </select>
         </label>
 
         <label>
@@ -252,24 +265,14 @@
 
         <label>
           Asset Name
-          <input type="text" class="asset-name-input" name="asset_name" required value="{{ ch['asset']['name'] }}">
+          <input type="text" class="asset-name-input" name="asset_name" required readonly value="{{ ch['asset']['name'] }}">
         </label>
 
         <label>
           Asset URL
-          <input type="url" class="asset-url-input" name="asset_url" required value="{{ ch['asset']['url'] }}">
+          <input type="url" class="asset-url-input" name="asset_url" required readonly value="{{ ch['asset']['url'] }}">
+          <span class="hint">Auto-filled from the selected release asset. Use the direct GitHub release asset download URL.</span>
         </label>
-
-        <label>
-          SHA256
-          <input type="text" class="asset-sha-input" name="asset_sha256" value="{{ ch['asset']['sha256'] }}">
-        </label>
-
-        <div class="row">
-          <button type="button" class="btn sec compute-sha">Compute SHA256</button>
-          <label class="check"><input type="checkbox" class="auto-store" checked> Auto-store hash</label>
-        </div>
-        <p class="status hash-status"></p>
 
         <button type="submit" class="btn pri">Save {{ channel|capitalize }}</button>
       </form>
@@ -330,6 +333,8 @@
 
   {% if authenticated %}
   <script>
+    const LOCKED_REPO = {{ locked_repo|tojson }};
+    const REQUIRED_ASSET_NAME = {{ required_asset_name|tojson }};
     const formAssets = new WeakMap();
 
     function buildApi(path, params = {}) {
@@ -340,12 +345,6 @@
         }
       });
       return url.toString();
-    }
-
-    function syncRepos(value, source) {
-      document.querySelectorAll(".repo-input").forEach((input) => {
-        if (input !== source) input.value = value;
-      });
     }
 
     function renderAssets(container, assets) {
@@ -372,13 +371,66 @@
       });
     }
 
+    function fillAssetFields(form, asset) {
+      form.querySelector(".asset-name-input").value = asset?.name || "";
+      form.querySelector(".asset-url-input").value = asset?.url || "";
+    }
+
+    function selectPreferredAsset(form, assets) {
+      const assetSelect = form.querySelector(".asset-select");
+      if (!assets.length) {
+        fillAssetFields(form, null);
+        assetSelect.value = "";
+        return;
+      }
+      let idx = assets.findIndex((asset) => (asset.name || "") === REQUIRED_ASSET_NAME);
+      if (idx < 0) idx = 0;
+      assetSelect.value = String(idx);
+      fillAssetFields(form, assets[idx]);
+    }
+
+    function populateMinRequiredSelect(form, releases) {
+      const minRequiredSelect = form.querySelector(".min-required-select");
+      const savedValue = (minRequiredSelect.dataset.current || minRequiredSelect.value || "").trim();
+      minRequiredSelect.textContent = "";
+
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "None (no minimum)";
+      minRequiredSelect.appendChild(none);
+
+      const seen = new Set();
+      releases.forEach((rel) => {
+        const tag = (rel.tag_name || "").trim();
+        if (!tag || seen.has(tag)) return;
+        seen.add(tag);
+
+        const opt = document.createElement("option");
+        opt.value = tag;
+        opt.textContent = rel.prerelease ? `${tag} (pre-release)` : tag;
+        minRequiredSelect.appendChild(opt);
+      });
+
+      if (savedValue) {
+        const existing = Array.from(minRequiredSelect.options).find((opt) => opt.value === savedValue);
+        if (!existing) {
+          const custom = document.createElement("option");
+          custom.value = savedValue;
+          custom.textContent = `${savedValue} (saved)`;
+          minRequiredSelect.appendChild(custom);
+        }
+        minRequiredSelect.value = savedValue;
+      } else {
+        minRequiredSelect.value = "";
+      }
+    }
+
     async function loadAssets(form, tag) {
-      const repo = form.querySelector(".repo-input").value.trim();
       const assetSelect = form.querySelector(".asset-select");
       const assetsView = form.querySelector(".assets");
       const status = form.querySelector(".release-status");
 
-      if (!repo || !tag) {
+      if (!tag) {
         formAssets.set(form, []);
         assetSelect.textContent = "";
         const def = document.createElement("option");
@@ -386,12 +438,13 @@
         def.textContent = "Select an asset";
         assetSelect.appendChild(def);
         renderAssets(assetsView, []);
+        fillAssetFields(form, null);
         return;
       }
 
       status.textContent = `Fetching assets for ${tag}...`;
       try {
-        const resp = await fetch(buildApi("/admin/api/assets", { repo, tag }), {
+        const resp = await fetch(buildApi("/admin/api/assets", { repo: LOCKED_REPO, tag }), {
           credentials: "same-origin"
         });
         if (resp.status === 403) {
@@ -418,6 +471,7 @@
           assetSelect.appendChild(opt);
         });
 
+        selectPreferredAsset(form, assets);
         status.textContent = assets.length ? `Loaded ${assets.length} asset(s).` : "Release has no assets.";
       } catch (err) {
         status.textContent = `Asset fetch failed: ${err.message}`;
@@ -425,19 +479,14 @@
     }
 
     async function loadReleases(form) {
-      const repoInput = form.querySelector(".repo-input");
-      const repo = repoInput.value.trim();
       const releaseSelect = form.querySelector(".release-select");
+      const versionInput = form.querySelector(".version-input");
       const status = form.querySelector(".release-status");
-
-      if (!repo) {
-        status.textContent = "Enter owner/repo first.";
-        return;
-      }
+      const currentVersion = versionInput.value.trim();
 
       status.textContent = "Fetching releases...";
       try {
-        const resp = await fetch(buildApi("/admin/api/releases", { repo }), {
+        const resp = await fetch(buildApi("/admin/api/releases", { repo: LOCKED_REPO }), {
           credentials: "same-origin"
         });
         if (resp.status === 403) {
@@ -448,7 +497,6 @@
         if (!resp.ok) throw new Error(data.error || "Failed to load releases.");
 
         const releases = Array.isArray(data.releases) ? data.releases : [];
-        const curVersion = form.querySelector(".version-input").value.trim();
         releaseSelect.textContent = "";
 
         const def = document.createElement("option");
@@ -460,10 +508,19 @@
           const opt = document.createElement("option");
           opt.value = rel.tag_name || "";
           opt.textContent = rel.prerelease ? `${rel.tag_name} (pre-release)` : rel.tag_name;
-          if ((rel.tag_name || "") === curVersion) opt.selected = true;
+          if ((rel.tag_name || "") === currentVersion) opt.selected = true;
           releaseSelect.appendChild(opt);
         });
 
+        if (!releaseSelect.value && currentVersion) {
+          const fallback = document.createElement("option");
+          fallback.value = currentVersion;
+          fallback.textContent = `${currentVersion} (current)`;
+          fallback.selected = true;
+          releaseSelect.appendChild(fallback);
+        }
+
+        populateMinRequiredSelect(form, releases);
         status.textContent = releases.length ? "Releases loaded." : "No releases available.";
         if (releaseSelect.value) await loadAssets(form, releaseSelect.value);
       } catch (err) {
@@ -482,62 +539,23 @@
       form.querySelector(".asset-url-input").value = asset.url || "";
     }
 
-    async function computeSha(form) {
-      const button = form.querySelector(".compute-sha");
-      const status = form.querySelector(".hash-status");
-      const autoStore = form.querySelector(".auto-store");
-      const hashField = form.querySelector(".asset-sha-input");
-      const assetUrl = form.querySelector(".asset-url-input").value.trim();
-
-      if (!assetUrl) {
-        status.textContent = "Enter an asset URL first.";
-        return;
-      }
-
-      status.textContent = "Computing SHA256...";
-      button.disabled = true;
-      try {
-        const resp = await fetch(buildApi("/admin/api/sha256"), {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: assetUrl })
-        });
-        if (resp.status === 403) {
-          window.location.href = "/admin";
-          return;
-        }
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "Failed to compute hash.");
-        if (autoStore.checked) hashField.value = data.sha256 || "";
-        status.textContent = `SHA256: ${data.sha256 || ""}`;
-      } catch (err) {
-        status.textContent = `Hash compute failed: ${err.message}`;
-      } finally {
-        button.disabled = false;
-      }
-    }
-
     function initForm(form) {
-      const repoInput = form.querySelector(".repo-input");
-      const loadBtn = form.querySelector(".load-releases");
       const releaseSelect = form.querySelector(".release-select");
       const assetSelect = form.querySelector(".asset-select");
-      const hashBtn = form.querySelector(".compute-sha");
       const versionInput = form.querySelector(".version-input");
+      const minRequiredSelect = form.querySelector(".min-required-select");
 
-      repoInput.addEventListener("input", () => syncRepos(repoInput.value, repoInput));
-      loadBtn.addEventListener("click", () => loadReleases(form));
       releaseSelect.addEventListener("change", async () => {
         const tag = releaseSelect.value;
         if (tag) versionInput.value = tag;
         await loadAssets(form, tag);
       });
       assetSelect.addEventListener("change", () => selectAsset(form));
-      hashBtn.addEventListener("click", () => computeSha(form));
+      minRequiredSelect.addEventListener("change", () => {
+        minRequiredSelect.dataset.current = minRequiredSelect.value;
+      });
 
-      if (repoInput.value.trim()) loadReleases(form);
-      else renderAssets(form.querySelector(".assets"), []);
+      loadReleases(form);
     }
 
     document.querySelectorAll(".channel-form").forEach((form) => initForm(form));

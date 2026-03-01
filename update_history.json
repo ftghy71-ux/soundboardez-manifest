@@ -1,3 +1,11 @@
 {
-  "history": []
+  "history": [
+    {
+      "timestamp": "2026-03-01T15:27:32+00:00",
+      "channel": "stable",
+      "old_version": "1.0.0",
+      "new_version": "1.0.0",
+      "mandatory": false
+    }
+  ]
 }

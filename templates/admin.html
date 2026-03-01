@@ -161,22 +161,47 @@
     th { background: #10161f; }
     .yes { color: var(--bad); font-weight: 600; }
     .no { color: var(--good); font-weight: 600; }
+    .head-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .login-wrap {
+      max-width: 440px;
+      margin: 8vh auto 0 auto;
+    }
+    .login-title {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .error {
+      color: var(--bad);
+      font-size: 0.88rem;
+    }
   </style>
 </head>
 <body>
   <main class="wrap">
+    {% if authenticated %}
     <section class="head">
       <div>
         <h1>Manifest Admin Panel</h1>
         <p>Manage stable and beta update channels, GitHub releases, and update history.</p>
       </div>
-      <a class="chips" target="_blank" rel="noopener" href="{{ url_for('manifest') }}">Open /manifest</a>
+      <div class="head-actions">
+        <a class="chips" target="_blank" rel="noopener" href="{{ url_for('manifest') }}">Open /manifest</a>
+        <form method="post" action="{{ url_for('admin_logout') }}">
+          <button type="submit" class="btn sec">Sign Out</button>
+        </form>
+      </div>
     </section>
 
     <section class="grid">
       {% for channel in ["stable", "beta"] %}
       {% set ch = config["channels"][channel] %}
-      <form class="card channel-form" data-channel="{{ channel }}" method="post" action="{{ url_for('update_channel', channel=channel, key=admin_key) }}">
+      <form class="card channel-form" data-channel="{{ channel }}" method="post" action="{{ url_for('update_channel', channel=channel) }}">
         <h2>{{ channel|capitalize }} Channel</h2>
         <p>Control versions, release asset metadata, and mandatory state.</p>
 
@@ -280,15 +305,35 @@
         </table>
       </div>
     </section>
+    {% else %}
+    <section class="login-wrap">
+      <form class="card" method="post" action="{{ url_for('admin_login') }}">
+        <div class="login-title">
+          <h1>Admin Sign In</h1>
+          <p>Enter the admin key to access the control panel.</p>
+        </div>
+
+        {% if error %}
+        <p class="error">{{ error }}</p>
+        {% endif %}
+
+        <label>
+          Admin Key
+          <input type="text" name="key" autocomplete="off" required autofocus>
+        </label>
+
+        <button type="submit" class="btn pri">Open Admin Panel</button>
+      </form>
+    </section>
+    {% endif %}
   </main>
 
+  {% if authenticated %}
   <script>
-    const adminKey = {{ admin_key | tojson }};
     const formAssets = new WeakMap();
 
     function buildApi(path, params = {}) {
       const url = new URL(path, window.location.origin);
-      url.searchParams.set("key", adminKey);
       Object.entries(params).forEach(([k, v]) => {
         if (v !== "" && v !== null && v !== undefined) {
           url.searchParams.set(k, v);
@@ -346,7 +391,13 @@
 
       status.textContent = `Fetching assets for ${tag}...`;
       try {
-        const resp = await fetch(buildApi("/admin/api/assets", { repo, tag }));
+        const resp = await fetch(buildApi("/admin/api/assets", { repo, tag }), {
+          credentials: "same-origin"
+        });
+        if (resp.status === 403) {
+          window.location.href = "/admin";
+          return;
+        }
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || "Failed to load assets.");
 
@@ -386,7 +437,13 @@
 
       status.textContent = "Fetching releases...";
       try {
-        const resp = await fetch(buildApi("/admin/api/releases", { repo }));
+        const resp = await fetch(buildApi("/admin/api/releases", { repo }), {
+          credentials: "same-origin"
+        });
+        if (resp.status === 403) {
+          window.location.href = "/admin";
+          return;
+        }
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || "Failed to load releases.");
 
@@ -442,9 +499,14 @@
       try {
         const resp = await fetch(buildApi("/admin/api/sha256"), {
           method: "POST",
+          credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: assetUrl })
         });
+        if (resp.status === 403) {
+          window.location.href = "/admin";
+          return;
+        }
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || "Failed to compute hash.");
         if (autoStore.checked) hashField.value = data.sha256 || "";
@@ -480,5 +542,6 @@
 
     document.querySelectorAll(".channel-form").forEach((form) => initForm(form));
   </script>
+  {% endif %}
 </body>
 </html>

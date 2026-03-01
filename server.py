@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
 
@@ -17,6 +17,32 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "update_config.json"
 HISTORY_PATH = BASE_DIR / "update_history.json"
 GITHUB_API_BASE = "https://api.github.com"
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            env_key = key.strip()
+            env_val = value.strip().strip('"').strip("'")
+            if env_key and env_key not in os.environ:
+                os.environ[env_key] = env_val
+    except OSError:
+        return
+
+
+load_env_file(BASE_DIR / ".env")
+app.config["SECRET_KEY"] = (
+    os.environ.get("FLASK_SECRET_KEY")
+    or os.environ.get("ADMIN_KEY")
+    or "dev-insecure-secret-change-me"
+)
 
 
 def default_channel(version: str, asset_name: str, asset_url: str, sha256: str) -> dict[str, Any]:
@@ -227,6 +253,19 @@ def provided_admin_key() -> str:
     return (request.args.get("key") or "").strip()
 
 
+def is_admin_authenticated() -> bool:
+    return session.get("admin_authenticated") is True
+
+
+def authorize_admin_from_query_key() -> bool:
+    expected = admin_key()
+    provided = provided_admin_key()
+    if expected and provided and provided == expected:
+        session["admin_authenticated"] = True
+        return True
+    return False
+
+
 @app.before_request
 def protect_admin_routes() -> None:
     if not request.path.startswith("/admin"):
@@ -234,10 +273,21 @@ def protect_admin_routes() -> None:
 
     expected_key = admin_key()
     if not expected_key:
-        abort(500, description="ADMIN_KEY environment variable is not configured.")
+        abort(503, description="Admin is disabled until ADMIN_KEY environment variable is configured.")
 
-    if provided_admin_key() != expected_key:
-        abort(403, description="Forbidden. Access requires ?key=ADMIN_KEY.")
+    open_admin_paths = {"/admin", "/admin/login", "/admin/logout"}
+    if request.path in open_admin_paths:
+        authorize_admin_from_query_key()
+        return
+
+    if not request.path.startswith("/admin/api") and not request.path.startswith("/admin/update"):
+        return
+
+    authed = is_admin_authenticated() or authorize_admin_from_query_key()
+    if request.path.startswith("/admin/api") and not authed:
+        return jsonify({"error": "Forbidden. Sign in from /admin first."}), 403
+    if request.path.startswith("/admin/update") and not authed:
+        return redirect(url_for("admin_panel"))
 
 
 def github_headers() -> dict[str, str]:
@@ -322,15 +372,38 @@ def manifest() -> Any:
 
 @app.route("/admin")
 def admin_panel() -> Any:
+    if not is_admin_authenticated() and not authorize_admin_from_query_key():
+        return render_template("admin.html", authenticated=False, error="")
+
     config = load_config()
     history = load_history()["history"]
     history.sort(key=lambda entry: entry.get("timestamp", ""), reverse=True)
     return render_template(
         "admin.html",
+        authenticated=True,
         config=config,
         history=history,
-        admin_key=provided_admin_key(),
     )
+
+
+@app.post("/admin/login")
+def admin_login() -> Any:
+    expected = admin_key()
+    entered = (request.form.get("key") or "").strip()
+    if not expected:
+        abort(503, description="Admin is disabled until ADMIN_KEY environment variable is configured.")
+
+    if entered != expected:
+        return render_template("admin.html", authenticated=False, error="Invalid admin key."), 403
+
+    session["admin_authenticated"] = True
+    return redirect(url_for("admin_panel"))
+
+
+@app.post("/admin/logout")
+def admin_logout() -> Any:
+    session.pop("admin_authenticated", None)
+    return redirect(url_for("admin_panel"))
 
 
 @app.post("/admin/update/<channel>")
@@ -372,7 +445,7 @@ def update_channel(channel: str) -> Any:
     save_config(config)
     append_history_entry(channel_key, old_version, new_version, mandatory)
 
-    return redirect(url_for("admin_panel", key=provided_admin_key()))
+    return redirect(url_for("admin_panel"))
 
 
 @app.get("/admin/api/releases")

@@ -4,7 +4,10 @@ import requests
 app = Flask(__name__)
 
 REPO = "ami-nope/SoundboardEZ"
-
+@app.route("/")
+def home():
+    return "Manifest server running"
+    
 @app.route("/manifest")
 def manifest():
     try:

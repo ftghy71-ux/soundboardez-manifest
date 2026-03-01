@@ -1,48 +1,49 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import requests
+import json
+import os
 
 app = Flask(__name__)
 
 REPO = "ami-nope/SoundboardEZ"
-@app.route("/")
-def home():
-    return "Manifest server running"
-    
+CONFIG_FILE = "update_config.json"
+
 @app.route("/manifest")
 def manifest():
+    channel = request.args.get("channel", "stable")
+
     try:
+        with open(CONFIG_FILE, "r") as f:
+            config = json.load(f)
+
+        if channel not in config:
+            return jsonify({"error": "Invalid channel"}), 400
+
+        channel_data = config[channel]
+        version = channel_data["version"]
+
+        # Fetch specific release by tag
         r = requests.get(
-            f"https://api.github.com/repos/{REPO}/releases/latest",
+            f"https://api.github.com/repos/{REPO}/releases/tags/{version}",
             timeout=5
         )
         r.raise_for_status()
-        data = r.json()
+        release = r.json()
 
-        # Example tag: "1.1"
-        tag = data["tag_name"]
+        files = {}
 
-        asset_url = None
-        for asset in data.get("assets", []):
-            if asset["name"] == "SoundboardEZ.exe":
-                asset_url = asset["browser_download_url"]
-                break
-
-        if not asset_url:
-            return jsonify({"error": "SoundboardEZ.exe not found in latest release"}), 500
+        for asset in release.get("assets", []):
+            files[asset["name"]] = {
+                "url": asset["browser_download_url"]
+            }
 
         return jsonify({
-            "version": tag,
-            "mandatory": False,
-            "files": {
-                "SoundboardEZ.exe": {
-                    "url": asset_url
-                }
-            }
+            "version": version,
+            "mandatory": channel_data["mandatory"],
+            "patch_notes": channel_data["patch_notes"],
+            "min_required_version": channel_data["min_required_version"],
+            "files": files
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)

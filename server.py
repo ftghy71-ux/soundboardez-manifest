@@ -262,10 +262,8 @@ def build_manifest(channel_config: dict[str, Any], version_override: str | None 
     return {
         "version": (version_override or str(channel_config.get("version", "")).strip()),
         "mandatory": coerce_bool(channel_config.get("mandatory", False)),
-        "files": {
-            "full_package": {
-                "url": asset_url,
-            }
+        "full": {
+            "url": asset_url,
         },
     }
 
@@ -438,13 +436,9 @@ def compute_sha256_from_url(asset_url: str) -> str:
 
 @app.route("/manifest")
 def manifest() -> Any:
-    return jsonify({
-        "version": "1.3",
-        "mandatory": True,
-        "full": {
-            "url": "https://github.com/ami-nope/SoundboardEZ/releases/download/1.3/SoundboardEZ1.3.zip"
-        }
-    })
+    config = load_config()
+    channel_config = config["channels"]["stable"]
+    return jsonify(build_manifest(channel_config))
 
 
 @app.route("/admin")

@@ -298,7 +298,7 @@
           <span class="hint">Auto-filled from the selected release asset. Use the direct GitHub release asset download URL.</span>
         </label>
 
-        <button type="submit" class="btn pri">Save {{ channel|capitalize }}</button>
+        <button type="submit" class="btn pri">Push {{ channel|capitalize if channel == 'beta' else 'Update' }}</button>
       </form>
       {% endfor %}
     </section>
